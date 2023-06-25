@@ -15,16 +15,17 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"strconv"
 	"sync"
 	"time"
 )
 
 var (
-	VerStr         string = "2023-06-21.1"
+	VerStr         string = "2023-06-23.10"
 	HttpClient     *FoxHTTPClient
 	DefJobCount    int    = 5
 	DefTimeOut     int    = 9
-	DefUserAgent   string = "wofjaweirwl"
+	DefUserAgent   string = "faiweglwiifajsl"
 	TmpDir         string = "m3u8TMP"
 	TsURList       []string
 	CheckTimeStamp bool = false
@@ -226,10 +227,24 @@ func (fhc *FoxHTTPClient) getTS(iURL string, savePath string) string {
 	}
 	f, _ := os.OpenFile(savePath, os.O_RDWR|os.O_CREATE, 0666)
 	defer f.Close()
-	io.Copy(f, response.Body)
+	writeLen, err := io.Copy(f, response.Body)
+	if err != nil {
+		fmt.Println("- Error @ getTS() io.Copy():", err)
+		return ""
+	}
 	response.Body.Close()
 	f.Close()
-	chFileLastModified(savePath, response.Header.Get("Last-Modified"))
+	hLen := response.Header.Get("Content-Length")
+	if "" != hLen {
+		if hLen == strconv.FormatInt(writeLen, 10) {
+			chFileLastModified(savePath, response.Header.Get("Last-Modified"))
+		} else {
+			fmt.Println("- Error @ getTS() 文件未下载完毕 :", savePath)
+			return ""
+		}
+	} else {
+		chFileLastModified(savePath, response.Header.Get("Last-Modified"))
+	}
 	return savePath
 }
 
