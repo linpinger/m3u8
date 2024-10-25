@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	VerStr         string = "2023-12-03.10"
+	VerStr         string = "2024-10-25.15"
 	HttpClient     *FoxHTTPClient
 	DefJobCount    int    = 3
 	DefTimeOut     int    = 18
@@ -210,7 +210,7 @@ type FoxHTTPClient struct {
 
 func NewFoxHTTPClient() *FoxHTTPClient {
 	tOut, _ := time.ParseDuration(fmt.Sprintf("%ds", DefTimeOut))
-	return &FoxHTTPClient{httpClient: &http.Client{Transport: &http.Transport{MaxIdleConnsPerHost: 9}, Timeout: tOut}}
+	return &FoxHTTPClient{httpClient: &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, MaxIdleConnsPerHost: 9}, Timeout: tOut}}
 }
 
 func (fhc *FoxHTTPClient) getTS(iURL string, savePath string) string {
