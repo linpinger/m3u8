@@ -21,11 +21,11 @@ import (
 )
 
 var (
-	VerStr         string = "2023-06-23.10"
+	VerStr         string = "2023-12-03.10"
 	HttpClient     *FoxHTTPClient
-	DefJobCount    int    = 5
-	DefTimeOut     int    = 9
-	DefUserAgent   string = "faiweglwiifajsl"
+	DefJobCount    int    = 3
+	DefTimeOut     int    = 18
+	DefUserAgent   string = "wewwapple2xsd"
 	TmpDir         string = "m3u8TMP"
 	TsURList       []string
 	CheckTimeStamp bool = false
@@ -148,6 +148,9 @@ func getTSURList(iM3U8 string, iM3U8URL string) {
 				fi, err := os.Stat(tsName)
 				if err == nil || os.IsExist(err) {
 					if CheckTimeStamp { // 根据时间戳判断下载是否完整
+						if fi.Size() < 1024 { // 小于1K: 2023-12-03 add
+							os.Remove(tsName)
+						}
 						if time.Since(fi.ModTime()).Hours() < 3 { // 小于3小时判断时间
 							TsURList = append(TsURList, tsURL)
 							os.Remove(tsName)
