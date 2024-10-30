@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -20,22 +19,36 @@ import (
 	"time"
 )
 
+const VerStr string = "2024-10-29.09"
+
+type FoxCFG struct {
+	CheckTimeStamp bool
+	TmpDir         string
+	DefUserAgent   string
+	DefJobCount    int
+	DefTimeOut     int
+}
+
 var (
-	VerStr         string = "2024-10-25.15"
+	CFG            *FoxCFG
 	HttpClient     *FoxHTTPClient
-	DefJobCount    int    = 3
-	DefTimeOut     int    = 18
-	DefUserAgent   string = "wewwapple2xsd"
-	TmpDir         string = "m3u8TMP"
 	TsURList       []string
-	CheckTimeStamp bool = false
 )
 
 func init() {
+	CFG = &FoxCFG {
+		DefUserAgent: "wewwapple2xsd",
+		TmpDir: "auto",
+		DefJobCount: 3,
+		DefTimeOut: 18,
+		CheckTimeStamp:	false,
+	}
 	HttpClient = NewFoxHTTPClient()
 }
 
 func main() {
+	m3u8URL := "https://xxxxx.com/33000/2233/2233.m3u8"
+
 	// 命令行参数
 	flag.Usage = func() {
 		fmt.Println("# Version:", VerStr)
@@ -43,37 +56,27 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
-	bFFMPEG := false
-	flag.BoolVar(&bFFMPEG, "z", bFFMPEG, "下载完后，调用ffmpeg转为:../xxx.mp4")
-	flag.BoolVar(&CheckTimeStamp, "c", CheckTimeStamp, "慎用:分配任务前检查TS时间戳，如果到现在小于3小时，就删除并加入下载列表")
-	flag.IntVar(&DefJobCount, "n", DefJobCount, "TS下载线程数[1-9]")
-	flag.IntVar(&DefTimeOut, "t", DefTimeOut, "连接超时时间，单位秒")
-	flag.StringVar(&TmpDir, "d", "auto", "临时文件夹，例如:/dev/shm/2233/")
-	flag.StringVar(&DefUserAgent, "u", DefUserAgent, "HTTP头部User-Agent字段")
+	flag.BoolVar(&CFG.CheckTimeStamp, "c", CFG.CheckTimeStamp, "慎用:分配任务前检查TS时间戳，如果到现在小于3小时，就删除并加入下载列表")
+	flag.IntVar(&CFG.DefJobCount, "n", CFG.DefJobCount, "TS下载线程数[1-9]")
+	flag.IntVar(&CFG.DefTimeOut, "t", CFG.DefTimeOut, "连接超时时间，单位秒")
+	flag.StringVar(&CFG.TmpDir, "d", CFG.TmpDir, "临时文件夹，例如:/dev/shm/2233/")
+	flag.StringVar(&CFG.DefUserAgent, "u", CFG.DefUserAgent, "HTTP头部User-Agent字段")
 	flag.Parse()             // 处理参数
-	fileCount := flag.NArg() // 处理后的参数个数，一般是URL
-	m3u8URL := "https://xxxxx.com/1687250810/33000/2233/2233.m3u8"
-	if fileCount == 1 {
-		m3u8URL = flag.Arg(0)
+	switch flag.NArg() {
+		case 1: m3u8URL = flag.Arg(0)
+		default: flag.Usage()
 	}
 
-	// 下载并读取m3u8
+	// 解析URL得到文件名及临时目录
 	fmt.Println("# 开始 :", m3u8URL)
-	m3u8Name := GetFileNameOfURL(m3u8URL)
-	vid := strings.ReplaceAll(strings.ReplaceAll(m3u8Name, ".M3U8", ""), ".m3u8", "")
-	if "auto" == TmpDir {
-		TmpDir = vid // 临时目录
+	m3u8Name := GetFileNameOfURL(m3u8URL) // 2233.m3u8
+	if "auto" == CFG.TmpDir {
+		CFG.TmpDir = strings.ReplaceAll(strings.ReplaceAll(m3u8Name, ".M3U8", ""), ".m3u8", "") // 临时目录: 2233
 	}
-
-	// if fileCount == 0 {
-	// 	fmt.Println("DefJobCount:", DefJobCount)
-	// 	fmt.Println("DefTimeOut:", DefTimeOut)
-	// 	fmt.Println("TmpDir:", TmpDir)
-	// 	os.Exit(0)
-	// }
 
 	chWorkingDir() // 创建并进入临时文件夹
 
+	// 下载并读取m3u8
 	m3u8Content := ""
 	if !FileExist(m3u8Name) {
 		fmt.Println("- 下载:", m3u8URL)
@@ -95,16 +98,17 @@ func main() {
 	}
 
 	// 获取ts url 并按任务数分配
-	getTSURList(m3u8Content, m3u8URL)
+	getTSURList(m3u8Content, m3u8URL) // 解析得到 TsURList
 	tsCount := len(TsURList)
-	perTS := int(math.Ceil(float64(tsCount) / float64(DefJobCount)))
-	fmt.Println("- TS数:", tsCount, "/", DefJobCount, "=", perTS)
+	perTS := int(math.Ceil(float64(tsCount) / float64(CFG.DefJobCount)))
+	fmt.Println("- TS数:", tsCount, "/", CFG.DefJobCount, "=", perTS)
 
+	// 分配任务
 	var wg sync.WaitGroup
-	for i := 1; i <= DefJobCount; i++ {
+	for i := 1; i <= CFG.DefJobCount; i++ {
 		startNO := 0
 		endNO := 0
-		if i == DefJobCount { // 最后一组
+		if i == CFG.DefJobCount { // 最后一组
 			startNO = perTS * (i - 1)
 			endNO = tsCount
 		} else {
@@ -118,7 +122,7 @@ func main() {
 			urlCount := endIDX - startIDX
 			defer wg.Done()
 			for i, tsURL := range TsURList[startIDX:endIDX] {
-				fmt.Println(thNum, "/", DefJobCount, ":", i+1, "/", urlCount, GetFileNameOfURL(tsURL))
+				fmt.Println(thNum, "/", CFG.DefJobCount, ":", i+1, "/", urlCount, GetFileNameOfURL(tsURL))
 				HttpClient.getTS(tsURL, "")
 			}
 		}(startNO, endNO, i)
@@ -127,14 +131,6 @@ func main() {
 
 	fmt.Println("# 完毕 :", m3u8URL)
 
-	if bFFMPEG {
-		_, erre := exec.LookPath("ffmpeg")
-		if erre != nil {
-			fmt.Println("- 木有找到ffmpeg: ", erre)
-		} else {
-			exec.Command("ffmpeg", "-i", m3u8Name, "-c", "copy", "../"+vid+".mp4").Output()
-		}
-	}
 }
 
 func getTSURList(iM3U8 string, iM3U8URL string) {
@@ -147,7 +143,7 @@ func getTSURList(iM3U8 string, iM3U8URL string) {
 				tsName := GetFileNameOfURL(tsURL)
 				fi, err := os.Stat(tsName)
 				if err == nil || os.IsExist(err) {
-					if CheckTimeStamp { // 根据时间戳判断下载是否完整
+					if CFG.CheckTimeStamp { // 根据时间戳判断下载是否完整
 						if fi.Size() < 1024 { // 小于1K: 2023-12-03 add
 							os.Remove(tsName)
 						}
@@ -192,12 +188,12 @@ func FileRead(iPath string) string {
 }
 
 func chWorkingDir() {
-	err := os.MkdirAll(TmpDir, 0750)
+	err := os.MkdirAll(CFG.TmpDir, 0750)
 	if err != nil && !os.IsExist(err) {
 		fmt.Println("- Error @ createWorkingDir() MkdirAll()")
 		return
 	}
-	err = os.Chdir(TmpDir)
+	err = os.Chdir(CFG.TmpDir)
 	if err != nil {
 		fmt.Println("- Error @ createWorkingDir() ChDir()")
 		return
@@ -209,13 +205,13 @@ type FoxHTTPClient struct {
 }
 
 func NewFoxHTTPClient() *FoxHTTPClient {
-	tOut, _ := time.ParseDuration(fmt.Sprintf("%ds", DefTimeOut))
+	tOut, _ := time.ParseDuration(fmt.Sprintf("%ds", CFG.DefTimeOut))
 	return &FoxHTTPClient{httpClient: &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, MaxIdleConnsPerHost: 9}, Timeout: tOut}}
 }
 
 func (fhc *FoxHTTPClient) getTS(iURL string, savePath string) string {
 	req, _ := http.NewRequest("GET", iURL, nil)
-	req.Header.Set("User-Agent", DefUserAgent)
+	req.Header.Set("User-Agent", CFG.DefUserAgent)
 	req.Header.Set("Connection", "keep-alive")
 
 	response, err := fhc.httpClient.Do(req)
