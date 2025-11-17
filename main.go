@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const VerStr string = "2024-10-29.09"
+const VerStr string = "2025-11-17.14"
 
 type FoxCFG struct {
 	CheckTimeStamp bool
@@ -67,23 +67,35 @@ func main() {
 		default: flag.Usage()
 	}
 
-	// 解析URL得到文件名及临时目录
-	fmt.Println("# 开始 :", m3u8URL)
+	// start:
+	fmt.Println("# 开始:", m3u8URL)
+	m3u8Content := ""
+
 	m3u8Name := GetFileNameOfURL(m3u8URL) // 2233.m3u8
+	if !FileExist(m3u8Name) {
+		fmt.Println("- 下载:", m3u8URL)
+		m3u8Content = HttpClient.getText(m3u8URL)
+	}
+
+	// 如果m3u8中包含 #EXT-X-STREAM-INF，获取子m3u8地址并合成
+	if strings.Contains(m3u8Content, "#EXT-X-STREAM-INF") {
+		newM3U8URL := getSubM3U8(m3u8Content, m3u8URL)
+		m3u8Name = GetFileNameOfURL(newM3U8URL) // 2233.m3u8
+		if !FileExist(m3u8Name) {
+			fmt.Println("- 下载:", newM3U8URL)
+			m3u8Content = HttpClient.getText(newM3U8URL)
+		}
+		m3u8URL = newM3U8URL // 修改原始URL，后面可能用到
+	}
+
+	// 解析URL得到文件名及临时目录
 	if "auto" == CFG.TmpDir {
 		CFG.TmpDir = strings.ReplaceAll(strings.ReplaceAll(m3u8Name, ".M3U8", ""), ".m3u8", "") // 临时目录: 2233
 	}
-
 	chWorkingDir() // 创建并进入临时文件夹
 
-	// 下载并读取m3u8
-	m3u8Content := ""
-	if !FileExist(m3u8Name) {
-		fmt.Println("- 下载:", m3u8URL)
-		m3u8Name = HttpClient.getTS(m3u8URL, "")
-	}
-	fmt.Println("- 读取:", m3u8Name)
-	m3u8Content = FileRead(m3u8Name)
+	// 保存m3u8
+	FileWrite(m3u8Content, m3u8Name)
 
 	// 下载key
 	keyURL := getKeyURL(m3u8Content, m3u8URL)
@@ -173,6 +185,30 @@ func getKeyURL(iM3U8 string, iM3U8URL string) string { // 根据m3u8内容，得
 	return GetFullURL(uu[1], iM3U8URL)
 }
 
+// 可能有bug，获取#EXT-X-STREAM-INF的下一行，如果不是m3u8就会异常 ^_^
+func getSubM3U8(iM3U8 string, iM3U8URL string) string {
+	lines := strings.Split(iM3U8, "\n")
+	nCount := len(lines)
+	sURL := ""
+	for n, line := range lines {
+		if strings.Contains(line, "#EXT-X-STREAM-INF") {
+			if n+1 <= nCount && len(lines[n+1]) > 2 {
+				sURL = lines[n+1]
+				break
+			} else if n+2 <= nCount && len(lines[n+2]) > 2 {
+				sURL = lines[n+2]
+				break
+			}
+		}
+	}
+
+	if "" == sURL {
+		return ""
+	} else {
+		return GetFullURL(sURL, iM3U8URL)
+	}
+}
+
 func FileExist(filename string) bool {
 	_, err := os.Stat(filename)
 	return err == nil || os.IsExist(err)
@@ -185,6 +221,13 @@ func FileRead(iPath string) string {
 		return ""
 	}
 	return string(bytes)
+}
+
+func FileWrite(content, oPath string) {
+	err := os.WriteFile(oPath, []byte(content), os.ModePerm)
+	if err != nil {
+		fmt.Println("- Error @ FileWrite() :", err)
+	}
 }
 
 func chWorkingDir() {
@@ -245,6 +288,26 @@ func (fhc *FoxHTTPClient) getTS(iURL string, savePath string) string {
 		chFileLastModified(savePath, response.Header.Get("Last-Modified"))
 	}
 	return savePath
+}
+
+func (fhc *FoxHTTPClient) getText(iURL string) string {
+	req, _ := http.NewRequest("GET", iURL, nil)
+	req.Header.Set("User-Agent", CFG.DefUserAgent)
+	req.Header.Set("Connection", "keep-alive")
+
+	response, err := fhc.httpClient.Do(req)
+	if nil != err {
+		fmt.Println("- Error @ getText() :", err)
+		return ""
+	}
+	defer response.Body.Close()
+
+	bys, err := io.ReadAll(response.Body)
+	if err != nil {
+		fmt.Println("- Error @ getText() io.ReadAll():", err)
+		return ""
+	}
+	return string(bys)
 }
 
 func GetFileNameOfURL(iURL string) string {
